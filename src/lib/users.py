@@ -14,8 +14,8 @@ This file can also be imported as a module and contains the following functions:
 """
 
 
-from random import choice
-from src.lib.database import get_data, modify_data
+import random
+import src.lib.database as database
 from src.lib.exceptions import UsersNotFound
 
 
@@ -32,9 +32,13 @@ async def get_random_user(msg):
     Raises:
         UsersNotFound: If list of users is empty
     """
-    users = get_data(0, False, 'SELECT users_id FROM users')
+    users = database.get_data(
+        'mainDB',
+        False,
+        'SELECT users_id FROM users'
+    )
     try:
-        member = await msg.guild.fetch_member(choice(users))
+        member = await msg.guild.fetch_member(random.choice(users))
         return member
     except IndexError:
         raise UsersNotFound("В базе данных нет пользователей")
@@ -52,12 +56,16 @@ async def get_shipping_users(msg):
     Raises:
         UsersNotFound: If list of users is empty
     """
-    users = get_data(0, False, 'SELECT users_id FROM users')
+    users = database.get_data(
+        'mainDB',
+        False,
+        'SELECT users_id FROM users'
+    )
     try:
-        first_member = await msg.guild.fetch_member(choice(users))
-        second_member = await msg.guild.fetch_member(choice(users))
+        first_member = await msg.guild.fetch_member(random.choice(users))
+        second_member = await msg.guild.fetch_member(random.choice(users))
         while second_member == first_member:
-            second_member = await msg.guild.fetch_member(choice(users))
+            second_member = await msg.guild.fetch_member(random.choice(users))
         return [first_member, second_member]
     except IndexError:
         raise UsersNotFound("В базе данных нет пользователей")
@@ -87,8 +95,16 @@ def add_member_to_db(member):
         member (discord.member.Member): Info about member of guild
     """
     if member.bot:
-        return modify_data(0, 'INSERT INTO bots VALUES (?)', member.id)
-    return modify_data(0, 'INSERT INTO users VALUES (?)', member.id)
+        return database.modify_data(
+            'mainDB',
+            'INSERT INTO bots VALUES (?)',
+            member.id
+        )
+    return database.modify_data(
+        'mainDB',
+        'INSERT INTO users VALUES (?)',
+        member.id
+    )
 
 
 def rem_member_from_db(member):
@@ -104,37 +120,49 @@ def rem_member_from_db(member):
         member (discord.member.Member): Info about member of guild
     """
     if member.bot:
-        return modify_data(0, 'DELETE FROM bots WHERE bots_id = ?', member.id)
-    return modify_data(0, 'DELETE FROM users WHERE users_id = ?', member.id)
+        return database.modify_data(
+            'mainDB',
+            'DELETE FROM bots WHERE bots_id = ?',
+            member.id
+        )
+    return database.modify_data(
+        'mainDB',
+        'DELETE FROM users WHERE users_id = ?',
+        member.id
+    )
 
 
 def is_user_admin(user_id):
     """Check if user is an admin of bot.
 
     Parameters:
-        user_id (int): ID of user to check
+        user_id (str): ID of user to check
 
     Returns:
         bool: True, if user is admin of bot. False otherwise
     """
-    db_id = get_data(0,
-                     True,
-                     'SELECT admins_id FROM admin_list WHERE admins_id = ?',
-                     user_id)
-    return user_id == db_id
+    db_id = database.get_data(
+        'mainDB',
+        False,
+        'SELECT admins_id FROM admin_list WHERE admins_id = ?',
+        user_id
+    )
+    return int(user_id) in db_id
 
 
 def is_user_blocked(user_id):
     """Check if user is in blacklist of bot.
 
     Parameters:
-        user_id (int): ID of user to check
+        user_id (str): ID of user to check
 
     Returns:
         bool: True, if user is banned. False otherwise
     """
-    db_id = get_data(0,
-                     True,
-                     'SELECT blocked_id FROM block_list WHERE blocked_id = ?',
-                     user_id)
-    return user_id == db_id
+    db_id = database.get_data(
+        'mainDB',
+        False,
+        'SELECT blocked_id FROM block_list WHERE blocked_id = ?',
+        user_id
+    )
+    return int(user_id) in db_id

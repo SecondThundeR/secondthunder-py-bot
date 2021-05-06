@@ -1,39 +1,46 @@
-"""Send current uptime of bot.
+"""Bot's uptime handler.
 
-This script handles calculating and sending current bot's uptime
-
-This file can also be imported as a module and contains the following functions:
-    * get_bot_uptime - gets current bot's uptime and sends it
+This cog handles calculating and sending current bot's uptime
 """
 
 
-from time import time as curr_time
-from asyncio import sleep
-from datetime import timedelta
-from src.lib.database import get_data
-from src.utils.timedelta_formatter import format_timedelta
+import time
+import asyncio
+import datetime
+import src.lib.database as database
+import src.utils.timedelta_formatter as td_format
+from discord.ext import commands
 
 
-DELAY_TIME = 5
+class Uptime(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+        self.delay_time = 5
+
+    @commands.command(aliases=['uptime'])
+    async def send_uptime(self, ctx):
+        """Calculate and send current uptime of bot.
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+        """
+        curr_uptime = int(time.time()) - database.get_data(
+            'mainDB',
+            True,
+            'SELECT bot_uptime FROM variables',
+        )
+        time_string = td_format.format_timedelta(
+            datetime.timedelta(seconds=curr_uptime)
+        )
+        if curr_uptime < 36000:
+            await ctx.reply(f'Я не сплю уже на протяжении **0{time_string}**',
+                            delete_after=self.delay_time)
+        else:
+            await ctx.reply(f'Я не сплю уже на протяжении **{time_string}**',
+                            delete_after=self.delay_time)
+        await asyncio.sleep(self.delay_time)
+        await ctx.message.delete()
 
 
-async def get_bot_uptime(msg):
-    """Send current uptime of bot.
-
-    Parameters:
-        msg (discord.message.Message): Execute send to channel function
-    """
-    curr_uptime = int(curr_time()) - get_data(
-        0,
-        True,
-        'SELECT bot_uptime FROM variables',
-    )
-    time_string = format_timedelta(timedelta(seconds=curr_uptime))
-    if curr_uptime < 36000:
-        await msg.channel.send(f'Я не сплю уже на протяжении **0{time_string}**',
-                               delete_after=DELAY_TIME)
-    else:
-        await msg.channel.send(f'Я не сплю уже на протяжении **{time_string}**',
-                               delete_after=DELAY_TIME)
-    await sleep(DELAY_TIME)
-    await msg.delete()
+def setup(client):
+    client.add_cog(Uptime(client))

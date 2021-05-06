@@ -1,85 +1,90 @@
 """Get random number.
 
-This script handles getting random number in different ranges
+This cog handles getting random number in different ranges
 (From 1 to {some number} or From {some number} to {some number})
-
-This file can also be imported as a module and contains the following functions:
-    * get_random_number - gets random number and sends it
 """
 
 
-from random import randint
-from asyncio import sleep
+import random
+import asyncio
+from discord.ext import commands
 
 
-DELAY_TIME = 5
+class RandomNumbers(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+        self.delay_time = 5
+        self.range_number = None
+        self.random_number = None
+        self.first_number = None
+        self.second_number = None
 
+    @commands.command(aliases=['рандом'])
+    async def get_random_number(self, ctx, *args):
+        """Get random number and send it.
 
-async def get_random_number(msg, args):
-    """Get random number and send it.
-
-    Parameters:
-        msg (discord.message.Message): Execute send to channel function
-        args (list): List of arguments (Range numbers)
-    """
-    if not args:
-        await msg.channel.send(f'{msg.author.mention}, к сожалению, '
-                               f'я не получил аргументов для вывода рандома',
-                               delete_after=DELAY_TIME)
-        await sleep(DELAY_TIME)
-        await msg.delete()
-    elif len(args) == 1:
-        try:
-            range_number = int(args[0])
-            if range_number < 1 or range_number == 1:
-                await msg.channel.send(f'{msg.author.mention}, '
-                                       'я не могу выдать рандомное число '
-                                       f'от 1 до {range_number}',
-                                       delete_after=DELAY_TIME)
-                await sleep(DELAY_TIME)
-                await msg.delete()
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+            args (tuple): List of arguments (Range numbers)
+        """
+        if not args:
+            await ctx.reply('К сожалению, я не получил аргументов для вывода рандома',
+                            delete_after=self.delay_time)
+            await asyncio.sleep(self.delay_time)
+            await ctx.message.delete()
+        elif args:
+            if len(args) == 1:
+                try:
+                    self.range_number = int(args[0])
+                    if self.range_number <= 1:
+                        await ctx.reply('Я не могу выдать рандомное число '
+                                        f'от 1 до {self.range_number}',
+                                        delete_after=self.delay_time)
+                        await asyncio.sleep(self.delay_time)
+                        await ctx.message.delete()
+                    else:
+                        self.random_number = random.randint(1, self.range_number)
+                        await ctx.reply('Ваше рандомное число '
+                                        f'от 1 до {self.range_number}: '
+                                        f'**{self.random_number}**')
+                except ValueError:
+                    await ctx.reply('Ваш аргумент был введён неправильно',
+                                    delete_after=self.delay_time)
+                    await asyncio.sleep(self.delay_time)
+                    await ctx.message.delete()
+            elif len(args) == 2:
+                try:
+                    self.first_number = int(args[0])
+                    self.second_number = int(args[1])
+                    if self.first_number >= self.second_number:
+                        await ctx.reply('Я не могу выдать рандомное число '
+                                        f'в диапазоне от {self.first_number} до '
+                                        f'{self.second_number}',
+                                        delete_after=self.delay_time)
+                        await asyncio.sleep(self.delay_time)
+                        await ctx.message.delete()
+                    else:
+                        self.random_number = random.randint(
+                            self.first_number,
+                            self.second_number
+                        )
+                        await ctx.reply('Ваше рандомное число '
+                                        f'от {self.first_number} '
+                                        f'до {self.second_number}: '
+                                        f'**{self.random_number}**')
+                except ValueError:
+                    await ctx.reply('Ваш аргумент или аргументы '
+                                    'были введены неправильно',
+                                    delete_after=self.delay_time)
+                    await asyncio.sleep(self.delay_time)
+                    await ctx.message.delete()
             else:
-                random_number = randint(1, range_number)
-                await msg.channel.send(f'{msg.author.mention}, '
-                                       'ваше рандомное число '
-                                       f'от 1 до {range_number}: **{random_number}**')
-        except ValueError:
-            await msg.channel.send(
-                f'{msg.author.mention}, '
-                f'ваш аргумент был введён неправильно',
-                delete_after=DELAY_TIME
-            )
-            await sleep(DELAY_TIME)
-            await msg.delete()
-    elif len(args) == 2:
-        try:
-            first_number = int(args[0])
-            second_number = int(args[1])
-            if first_number > second_number or first_number == second_number:
-                await msg.channel.send(f'{msg.author.mention}, '
-                                       'я не могу выдать рандомное число '
-                                       f'в диапазоне от {first_number} до '
-                                       f'{second_number}',
-                                       delete_after=DELAY_TIME)
-                await sleep(DELAY_TIME)
-                await msg.delete()
-            else:
-                random_number = randint(first_number, second_number)
-                await msg.channel.send(f'{msg.author.mention}, '
-                                       f'ваше рандомное число '
-                                       f'от {first_number} до {second_number}: '
-                                       f'**{random_number}**')
-        except ValueError:
-            await msg.channel.send(f'{msg.author.mention}, '
-                                   'ваш аргумент или аргументы '
-                                   'были введены неправильно',
-                                   delete_after=DELAY_TIME)
-            await sleep(DELAY_TIME)
-            await msg.delete()
-    else:
-        await msg.channel.send(f'{msg.author.mention}, к сожалению, '
-                               'я получил аргументов больше, чем нужно, '
-                               f'а именно `{len(args) - 2}`',
-                               delete_after=DELAY_TIME)
-        await sleep(DELAY_TIME)
-        await msg.delete()
+                await ctx.reply(f'К сожалению, я получил аргументов больше, '
+                                f'чем нужно, а именно `{len(args) - 2}`',
+                                delete_after=self.delay_time)
+                await asyncio.sleep(self.delay_time)
+                await ctx.message.delete()
+
+
+def setup(client):
+    client.add_cog(RandomNumbers(client))

@@ -4,3 +4,7 @@ class CustomErrors(Exception):
 
 class UsersNotFound(CustomErrors):
     """Raised when users cannot be found in database"""
+
+
+class WordsImportError(CustomErrors):
+    """Raised when words base imported with failure"""

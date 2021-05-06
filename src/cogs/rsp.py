@@ -1,222 +1,256 @@
-"""Init text version of RSP game.
+"""Text version of RSP game.
 
-This script handles game logic of rock scissors paper.
-
-This file can also be imported as a module and contains the following functions:
-    * rsp_mode - starts game with bot/users
+This cog handles game logic of rock scissors paper.
 """
 
 
-from discord import channel
-from random import choice
-from asyncio import sleep
-from asyncio import TimeoutError as Timeout
-from src.lib.database import get_data, modify_data
+import discord
+import random
+import asyncio
+import src.lib.database as database
+from discord.ext import commands
 
 
-FAIL_DELAY = 4
-SUCCESS_DELAY = 1
-rsp_win_variants = {
-  'камень': 'ножницы',
-  'бумага': 'камень',
-  'ножницы': 'бумага'
-}
+class RSPGame(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+        self.fail_delay = 4
+        self.success_delay = 1
+        self.win_variants = {
+            'камень': 'ножницы',
+            'бумага': 'камень',
+            'ножницы': 'бумага'
+        }
 
+    @commands.command(aliases=['цуефа'])
+    async def rsp_mode(self, ctx, *args):
+        """Execute correct mode of game depending on arguments.
 
-async def rsp_mode(bot, msg, args):
-    """Execute correct mode of game depending on arguments.
+        If arguments aren't provided, executes multiplayer game.
+        Otherwise, executes game with bot
 
-    If arguments aren't provided, executes multiplayer game.
-    Otherwise, executes game with bot
-
-    Parameters:
-        bot (discord.client.Client): Execute wait_for for waiting user's message
-        msg (discord.message.Message): Execute send to channel function
-        args (list): List of arguments (RSP variants, if playing with bot)
-    """
-    if not args:
-        if get_data(0, True, 'SELECT rsp_game_active FROM variables') == 1:
-            await msg.channel.send('Сессия игры уже запущена, '
-                                   'чтобы начать новую игру, закончите старую')
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+            args (tuple): List of arguments (RSP variants, if playing with bot)
+        """
+        if not args:
+            if database.get_data(
+                'mainDB',
+                True,
+                'SELECT rsp_game_active FROM variables'
+            ):
+                await ctx.reply('Сессия игры уже запущена, '
+                                'чтобы начать новую игру, закончите старую')
+            else:
+                await RSPGame.rsp_multi_game(self, ctx)
         else:
-            await _rsp_multi_game(bot, msg)
+            await RSPGame.rsp_bot_game(self, ctx, args[0])
+
+    @staticmethod
+    def join_check(ctx):
+        """Check for correct command to join.
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+
+        Returns:
+            bool: True if all conditions are met, False otherwise
+        """
+        test_string = ctx.message.content.lower()
+        test_channel = isinstance(ctx.message.channel, discord.channel.DMChannel)
+        return bool(test_string == 'играть' and not test_channel)
+
+    def choice_check(self, ctx):
+        """Check for correct answer from user.
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+
+        Returns:
+            True, if all conditions are met
+        """
+        test_string = ctx.message.content.lower()
+        test_channel = isinstance(ctx.message.channel, discord.channel.DMChannel)
+        return bool(test_string in self.win_variants and test_channel)
+
+    async def purge_messages(self, messages):
+        """Delete all messages, that can distract users in channel.
+
+        Parameters:
+            message (list): List with messages to delete
+        """
+        for message in messages:
+            await message.delete()
+
+    def rsp_game(self, first_var, second_var, first_user_id, second_user_id):
+        """Get the outcome of the game and return its result.
+
+        This function handles check for winner of RSP
+        If no one wins, throw 'Draw'
+
+        Parameters:
+            first_var (str): First player choice
+            second_var (str): Second player choice
+            first_user_id (int): First player ID to mention
+            second_user_id (int): Second player ID to mention
+
+        Returns:
+            str: Outcome of the game
+        """
+        f_user_mention = f'<@{first_user_id}>'
+        s_user_mention = f'<@{second_user_id}>'
+        end_text = '**Игра между ' \
+                   f'{f_user_mention} и {s_user_mention} ' \
+                   'окончена!**\n'
+        outcome_text = ''
+        if first_var == self.win_variants[second_var]:
+            outcome_text = f'**Результаты:** {second_var}  🤜  {first_var}\n' \
+                        f'{s_user_mention} победил!'
+        elif second_var == self.win_variants[first_var]:
+            outcome_text = f'**Результаты:** {first_var}  🤜  {second_var}\n' \
+                        f'{f_user_mention} победил!'
+        else:
+            outcome_text = f'**Результаты:** {first_var}  🙏  {second_var}\n' \
+                        'И у нас ничья!'
+        return end_text + outcome_text
+
+    async def rsp_bot_game(self, ctx, user_choice):
+        """Game with bot.
+
+        This function executes random choice of bot and comparing it with
+        players choice
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+            user_choice (str): Player's move variant
+        """
+        if user_choice not in self.win_variants:
+            await ctx.reply('Похоже вы выбрали что-то не то...')
+        else:
+            bot_choice = random.choice(list(self.win_variants))
+            await ctx.send(RSPGame.rsp_game(
+                self, user_choice, bot_choice,
+                ctx.author.id, self.client.user.id
+            ))
+
+    async def rsp_multi_game(self, ctx):
+        """Game with other users of server.
+
+        This function executes game with other users.
+
+        Also, it waits for another user to play,
+        and waits for a response from each in turn,
+        then displays the outcome of the game
+
+        **Noteworthy:** When game is live, lock other games to be played,
+        while current game isn't finished
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+        """
+        database.modify_data(
+            'mainDB',
+            'UPDATE variables SET rsp_game_active = ?',
+            1
+        )
+        current_channel = ctx.message.channel
+        first_user = ctx.author
+        users_choice = []
+        messages_to_purge = []
+        await ctx.message.delete()
+        init_msg = await ctx.reply('Вы запустили игру! '
+                                   'Второй игрок, напишите "Играть"\n'
+                                   '*До автоотмены - 1 минута*')
+        messages_to_purge.append(init_msg)
+        try:
+            s_user_wait = await self.client.wait_for(
+                'message',
+                timeout=60,
+                check=RSPGame.join_check
+            )
+            second_user = s_user_wait.author
+        except asyncio.TimeoutError:
+            database.modify_data(
+                'mainDB',
+                'UPDATE variables SET rsp_game_active = ?',
+                0
+            )
+            game_fail = ctx.reply('Похоже никто не решил сыграть с вами. '
+                                  'Пока что я отменил данную игру')
+            messages_to_purge.append(game_fail)
+            await asyncio.sleep(self.fail_delay)
+            await RSPGame.purge_messages(self, messages_to_purge)
             return
-    else:
-        await _rsp_bot_game(bot, msg, args[0])
-
-
-def _join_check(msg):
-    """Check for correct command to join.
-
-    Parameters:
-        msg (discord.message.Message): Get content from message and author's ID
-
-    Returns:
-        True, if all conditions are met
-    """
-    if (msg.content.lower() == 'играть'
-            and not isinstance(msg.channel, channel.DMChannel)):
-        return True
-    return False
-
-
-def _choice_check(msg):
-    """Check for correct answer from user.
-
-    Parameters:
-        msg (discord.message.Message): Get content from message
-
-    Returns:
-        True, if all conditions are met
-    """
-    if (msg.content.lower() in rsp_win_variants
-            and isinstance(msg.channel, channel.DMChannel)):
-        return True
-    return False
-
-
-async def _purge_messages(messages):
-    """Delete all messages, that can distract users in channel.
-
-    Parameters:
-        message (list): List with messages to delete
-    """
-    for message in messages:
-        await message.delete()
-
-
-def _rsp_game_logic(first_var, second_var, first_user_id, second_user_id):
-    """Get the outcome of the game and return its result.
-
-    This function handles check for winner of RSP
-    If no one wins, throw 'Draw'
-
-    Parameters:
-        first_var (str): First player choice
-        second_var (str): Second player choice
-        first_user_id (int): First player ID to mention
-        second_user_id (int): Second player ID to mention
-
-    Returns:
-        str: Outcome of the game
-    """
-    f_user_mention = f'<@{first_user_id}>'
-    s_user_mention = f'<@{second_user_id}>'
-    end_text = '**Игра между ' \
-               f'{f_user_mention} и {s_user_mention} ' \
-               'окончена!**\n'
-    outcome_text = ''
-    if first_var == rsp_win_variants[second_var]:
-        outcome_text = f'**Результаты:** {second_var}  🤜  {first_var}\n' \
-                       f'{s_user_mention} победил!'
-    elif second_var == rsp_win_variants[first_var]:
-        outcome_text = f'**Результаты:** {first_var}  🤜  {second_var}\n' \
-                       f'{f_user_mention} победил!'
-    else:
-        outcome_text = f'**Результаты:** {first_var}  🙏  {second_var}\n' \
-                       'И у нас ничья!'
-    return end_text + outcome_text
-
-
-async def _rsp_bot_game(bot, msg, user_choice):
-    """Game with bot.
-
-    This function executes random choice of bot and comparing it with
-    players choice
-
-    Parameters:
-        bot (discord.client.Client): Get current bot ID
-        msg (discord.message.Message): Execute send to channel function
-        user_choice (str): Player's move variant
-    """
-    if user_choice not in rsp_win_variants:
-        await msg.channel.send(f'{msg.author.mention}, '
-                               'похоже вы выбрали что-то не то...')
-    else:
-        bot_choice = choice(list(rsp_win_variants))
-        await msg.channel.send(_rsp_game_logic(user_choice, bot_choice,
-                                               msg.author.id, bot.user.id))
-
-
-async def _rsp_multi_game(bot, msg):
-    """Game with other users of server.
-
-    This function executes game with other users.
-
-    Also, it waits for another user to play,
-    and waits for a response from each in turn,
-    then displays the outcome of the game
-
-    **Noteworthy:** When game is live, lock other games to be played,
-    while current game isn't finished
-
-    Parameters:
-        bot (discord.client.Client): Execute wait_for for waiting user's message
-        msg (discord.message.Message): Execute send to channel function
-    """
-    modify_data(0, 'UPDATE variables SET rsp_game_active = ?', 1)
-    current_channel = msg.channel
-    first_user = msg.author
-    users_choice = []
-    messages_to_purge = []
-    await msg.delete()
-    init_msg = await current_channel.send(f'{first_user.mention} запустил игру! '
-                                          'Второй игрок, напишите "Играть"\n'
-                                          '*Время ожидания второго игрока - 1 минута*')
-    messages_to_purge.append(init_msg)
-    try:
-        s_user_wait = await bot.wait_for('message', timeout=60, check=_join_check)
-        second_user = s_user_wait.author
-    except Timeout:
-        modify_data(0, 'UPDATE variables SET rsp_game_active = ?', 0)
-        game_fail = current_channel.send(f'{first_user.mention}, '
-                                         'похоже никто не решил сыграть с вами. '
-                                         'Пока что я отменил данную игру')
-        messages_to_purge.append(game_fail)
-        await sleep(FAIL_DELAY)
-        await _purge_messages(messages_to_purge)
-        return
-    else:
-        if s_user_wait.author.id == first_user.id:
-            modify_data(0, 'UPDATE variables SET rsp_game_active = ?', 0)
-            f_user_join = await current_channel.send(f'{first_user.mention}, '
-                                                     'решил поиграть сам собой, '
-                                                     'отменяю данную игру')
-            messages_to_purge.append(s_user_wait)
-            messages_to_purge.append(f_user_join)
-            await sleep(FAIL_DELAY)
-            await _purge_messages(messages_to_purge)
+        else:
+            if s_user_wait.author.id == first_user.id:
+                database.modify_data(
+                    'mainDB',
+                    'UPDATE variables SET rsp_game_active = ?',
+                    0
+                )
+                f_user_join = await ctx.reply('Вы решили поиграть сам собой, '
+                                              'я отменяю данную игру')
+                messages_to_purge.append(s_user_wait)
+                messages_to_purge.append(f_user_join)
+                await asyncio.sleep(self.fail_delay)
+                await RSPGame.purge_messages(self, messages_to_purge)
+                return
+        await s_user_wait.delete()
+        await init_msg.edit(content='Сейчас идёт игра между '
+                                    f'{first_user.mention} и {second_user.mention}')
+        try:
+            await first_user.send('Ваш вариант *(На ответ 1 минута)*:')
+            first_response = await self.client.wait_for(
+                'message',
+                timeout=30,
+                check=RSPGame.choice_check
+            )
+            users_choice.append(first_response.content.lower())
+        except asyncio.TimeoutError:
+            database.modify_data(
+                'mainDB',
+                'UPDATE variables SET rsp_game_active = ?',
+                0
+            )
+            f_move_fail = await current_channel.send(f'{first_user.mention} '
+                                                     'не успел ответить вовремя. '
+                                                     'Игра отменена')
+            messages_to_purge.append(f_move_fail)
+            await asyncio.sleep(self.fail_delay)
+            await RSPGame.purge_messages(self, messages_to_purge)
             return
-    await s_user_wait.delete()
-    await init_msg.edit(content='Сейчас идёт игра между '
-                                f'{first_user.mention} и {second_user.mention}')
-    try:
-        await first_user.send('Ваш вариант *(На ответ 1 минута)*:')
-        first_response = await bot.wait_for('message', timeout=30, check=_choice_check)
-        users_choice.append(first_response.content.lower())
-    except Timeout:
-        modify_data(0, 'UPDATE variables SET rsp_game_active = ?', 0)
-        f_move_fail = await current_channel.send(f'{first_user.mention} '
-                                                 'не успел отправить вариант вовремя. '
-                                                 'Игра отменена')
-        messages_to_purge.append(f_move_fail)
-        await sleep(FAIL_DELAY)
-        await _purge_messages(messages_to_purge)
-        return
-    try:
-        await second_user.send('Ваш вариант *(На ответ 1 минута)*:')
-        second_response = await bot.wait_for('message', timeout=30, check=_choice_check)
-        users_choice.append(second_response.content.lower())
-    except Timeout:
-        modify_data(0, 'UPDATE variables SET rsp_game_active = ?', 0)
-        s_move_fail = await current_channel.send(f'{second_user.mention} '
-                                                 'не успел отправить вариант вовремя. '
-                                                 'Игра отменена')
-        messages_to_purge.append(s_move_fail)
-        await sleep(FAIL_DELAY)
-        await _purge_messages(messages_to_purge)
-        return
-    modify_data(0, 'UPDATE variables SET rsp_game_active = ?', 0)
-    await current_channel.send(_rsp_game_logic(users_choice[0], users_choice[1],
-                                               first_user.id, second_user.id))
-    await _purge_messages(messages_to_purge)
+        try:
+            await second_user.send('Ваш вариант *(На ответ 1 минута)*:')
+            second_response = await self.client.wait_for(
+                'message',
+                timeout=30,
+                check=RSPGame.choice_check
+            )
+            users_choice.append(second_response.content.lower())
+        except asyncio.TimeoutError:
+            database.modify_data(
+                'mainDB',
+                'UPDATE variables SET rsp_game_active = ?',
+                0
+            )
+            s_move_fail = await current_channel.send(f'{second_user.mention} '
+                                                     'не успел ответить вовремя. '
+                                                     'Игра отменена')
+            messages_to_purge.append(s_move_fail)
+            await asyncio.sleep(self.fail_delay)
+            await RSPGame.purge_messages(self, messages_to_purge)
+            return
+        database.modify_data(
+            'mainDB',
+            'UPDATE variables SET rsp_game_active = ?',
+            0
+        )
+        await current_channel.send(RSPGame.rsp_game(
+            self, users_choice[0], users_choice[1],
+            first_user.id, second_user.id
+        ))
+        await RSPGame.purge_messages(self, messages_to_purge)
+
+
+def setup(client):
+    client.add_cog(RSPGame(client))

@@ -1,96 +1,113 @@
 """Manage admin list of bot.
 
-This script handles addition/removal id's of user to/from admin list
-
-This file can also be imported as a module and contains the following functions:
-    * admin_manager - checks if user is admin and executes required function
+This cog handles addition/removal id's of user to/from admin list
 """
 
 
-from asyncio import TimeoutError as Timeout
-from src.lib.database import get_data, modify_data
-from src.lib.users import is_user_admin
+import asyncio
+import src.lib.database as database
+import src.lib.users as users
+from discord.ext import commands
 
 
-async def admin_manager(bot, msg, args):
-    """Check if user is admin and execute required operation.
+class ManageAdmins(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+        self.delete_time = 5
 
-    This function handles user checking and executing addition/deletion
-    of user's ID to/from admin list
+    @commands.command(aliases=['админ'])
+    @commands.dm_only()
+    async def admin_manager(self, ctx, *args):
+        """Check if user is admin and execute required operation.
 
-    Parameters:
-        bot (discord.client.Client): Execute wait_for for waiting user's message
-        msg (discord.message.Message): Execute send to channel function
-        args (list): List with operation and user's ID
-    """
-    if len(args) == 2 and is_user_admin(msg.author.id):
-        if args[0] == 'добавить':
-            await _add_admin(msg, args[1])
-        elif args[0] == 'удалить':
-            await _remove_admin(bot, msg, args[1])
+        This function handles user checking and executing addition/deletion
+        of user's ID to/from admin list
 
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+            args (tuple): List with selected mode and user's ID
+        """
+        if len(args) == 2 and users.is_user_admin(ctx.author.id):
+            if args[0] == 'добавить':
+                await ManageAdmins.add_admin(self, ctx, args[1])
+            elif args[0] == 'удалить':
+                await ManageAdmins.remove_admin(self, ctx, args[1])
 
-async def _add_admin(msg, user_id):
-    """Add user's ID to admin list.
+    async def add_admin(self, ctx, user_id):
+        """Add user's ID to admin list.
 
-    This function handles addition of user's ID to admin list.
+        This function handles addition of user's ID to admin list.
 
-    Parameters:
-        msg (discord.message.Message): Execute send to channel function
-        user_id (int): User's ID to add as an admin
-    """
-    if is_user_admin(user_id):
-        await msg.channel.send('Данный пользователь уже админ')
-    else:
-        modify_data(0, 'INSERT INTO admin_list VALUES (?)', user_id)
-        await msg.channel.send('Я успешно добавил такого админа')
-
-
-async def _remove_admin(bot, msg, user_id):
-    """Remove user's ID from admin list.
-
-    This function handles removal of user's ID from admin list.
-
-    **Noteworthy:** Since this list is very important for the bot's operation,
-    several checks have been added here: if the list consists of one ID,
-    it cancels the deletion, if the admin wants to delete himself,
-    he is asked to confirm the action
-
-    Parameters:
-        bot (discord.client.Client): Execute wait_for for waiting user's message
-        msg (discord.message.Message): Execute send to channel function
-        user_id (int): User's ID to remove from admins
-    """
-    if msg.author.id == int(user_id) and is_user_admin(user_id):
-        if len(get_data(0, False, 'SELECT admins_id FROM admin_list')) == 1:
-            await msg.channel.send('Вы единственный админ бота. '
-                                   'Управление ботом будет затруднено, '
-                                   'если список админов будет пуст, '
-                                   'поэтому я отменяю удаление')
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+            user_id (str): User's ID to add as an admin
+        """
+        if users.is_user_admin(user_id):
+            await ctx.reply('Данный пользователь уже админ')
         else:
-            await msg.channel.send('Вы уверены что хотите убрать себя из списка?'
-                                   ' (Да/Нет)')
-            try:
-                wait_msg = await bot.wait_for('message', timeout=15)
-            except Timeout:
-                await msg.channel.send('Похоже вы не решились с выбором, '
-                                       'пока что я отменил удаление вас из списка')
+            database.modify_data(
+                'mainDB',
+                'INSERT INTO admin_list VALUES (?)',
+                user_id
+            )
+            await ctx.reply('Я успешно добавил такого админа')
+
+    async def remove_admin(self, ctx, user_id):
+        """Remove user's ID from admin list.
+
+        This function handles removal of user's ID from admin list.
+
+        **Noteworthy:** Since this list is very important for the bot's operation,
+        several checks have been added here: if the list consists of one ID,
+        it cancels the deletion, if the admin wants to delete himself,
+        he is asked to confirm the action
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+            user_id (str): User's ID to remove from admins
+        """
+        if int(user_id) == ctx.author.id and users.is_user_admin(user_id):
+            if len(database.get_data(
+                'mainDB',
+                False,
+                'SELECT admins_id FROM admin_list'
+            )) == 1:
+                await ctx.reply('Вы единственный админ бота. '
+                                'Управление ботом будет затруднено, '
+                                'если список админов будет пуст, '
+                                'поэтому я отменяю удаление')
             else:
-                if wait_msg.content.lower() == 'да':
-                    modify_data(
-                        0,
-                        'DELETE FROM admin_list WHERE admins_id = ?',
-                        user_id
-                    )
-                    await msg.channel.send('Я удалил вас из админов :(')
-                elif wait_msg.content.lower() in ['не', 'нет']:
-                    await msg.channel.send('Удаление было отменено')
+                ask_msg = await ctx.reply('Вы уверены что хотите убрать себя?'
+                                          ' (Да/Нет)')
+                try:
+                    wait_msg = await self.client.wait_for('message', timeout=15)
+                except asyncio.TimeoutError:
+                    await ask_msg.edit(content='Похоже вы не решились с выбором. '
+                                               'Я отменил удаление вас из списка')
                 else:
-                    await msg.channel.send('Вы ответили как-то иначе, '
-                                           'удаление было отменено')
-    else:
-        if not is_user_admin(user_id):
-            await msg.channel.send('Данный пользователь не является админом')
+                    if wait_msg.content.lower() in ['да', 'ок', 'давай']:
+                        database.modify_data(
+                            'mainDB',
+                            'DELETE FROM admin_list WHERE admins_id = ?',
+                            user_id
+                        )
+                        await ask_msg.edit(content='Я удалил вас из админов :(')
+                    elif wait_msg.content.lower() in ['не', 'нет', 'неа']:
+                        await ask_msg.edit(content='Удаление было отменено')
+                    else:
+                        await ask_msg.edit(content='Вы ответили как-то иначе, '
+                                                   'удаление было отменено')
         else:
-            modify_data(0, 'INSERT INTO admin_list VALUES (?)', user_id)
-            await msg.channel.send('Я успешно удалил такого админа')
+            if not users.is_user_admin(user_id):
+                await ctx.reply('Данный пользователь не является админом')
+            else:
+                database.modify_data(
+                    'mainDB',
+                    'DELETE FROM admin_list WHERE admins_id = ?',
+                    user_id
+                )
+                await ctx.reply('Я успешно удалил такого админа')
+
+
+def setup(client):
+    client.add_cog(ManageAdmins(client))

@@ -1,41 +1,46 @@
 """Avatar switcher (Beta).
 
-This script allows users to change avatar of bot while it's running
+This cog allows users to change avatar of bot while it's running
 with certain command.
-
-This file can also be imported as a module and contains the following functions:
-    * switch_avatar - changes avatar of bot via command
 """
 
 
 import asyncio
-from datetime import timedelta
-from src.utils.timedelta_formatter import format_timedelta
-from src.utils.avatar_changer import get_avatar_bytes
+import datetime
+import src.utils.timedelta_formatter as td_format
+import src.utils.avatar_changer as avatar_changer
+from discord.ext import commands
 
 
-DELAY_TIME = 5
+class AvatarSwitcher(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+        self.delay_time = 5
+
+    @commands.command(aliases=['аватарка'])
+    async def avatar_switch(self, ctx):
+        """Change avatar of bot via command.
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+        """
+        avatar_data = avatar_changer.get_avatar_bytes()
+        if isinstance(avatar_data, int):
+            time_string = td_format.format_timedelta(
+                datetime.timedelta(seconds=avatar_data)
+            )
+            await ctx.reply('Пока что нельзя сменить аватарку. '
+                            f'Попробуйте через **{time_string}**',
+                            delete_after=self.delay_time)
+            await asyncio.sleep(self.delay_time)
+            await ctx.message.delete()
+        else:
+            await self.client.user.edit(avatar=avatar_data)
+            await ctx.reply('Аватарка успешно изменена!',
+                            delete_after=self.delay_time)
+            await asyncio.sleep(self.delay_time)
+            await ctx.message.delete()
 
 
-async def switch_avatar(msg, client):
-    """Change avatar of bot via command.
-
-    Parameters:
-        msg (discord.message.Message): Execute send to channel function
-        client (discord.Client): Execute avatar change function
-
-    """
-    avatar_data = get_avatar_bytes()
-    if isinstance(avatar_data, int):
-        time_string = format_timedelta(timedelta(seconds=avatar_data))
-        await msg.channel.send('Пока что нельзя сменить аватарку. '
-                               f'Попробуйте через **{time_string}**',
-                               delete_after=DELAY_TIME)
-        await asyncio.sleep(DELAY_TIME)
-        await msg.delete()
-    else:
-        await client.user.edit(avatar=avatar_data)
-        await msg.channel.send('Аватарка успешно изменена!',
-                               delete_after=DELAY_TIME)
-        await asyncio.sleep(DELAY_TIME)
-        await msg.delete()
+def setup(client):
+    client.add_cog(AvatarSwitcher(client))

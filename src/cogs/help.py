@@ -1,14 +1,12 @@
 """Send help message for using the bot.
 
-Provides a message with all available commands of bot
-
-This file can also be imported as a module and contains the following functions:
-    * send_help_message - sends message with commands of bot
+This cog provides a message with all available commands for bot
 """
 
 
-from discord import channel
-from asyncio import sleep
+import discord
+import asyncio
+from discord.ext import commands
 
 
 HELP_MESSAGE = 'Доступные команды бота: ' \
@@ -27,21 +25,34 @@ HELP_MESSAGE = 'Доступные команды бота: ' \
                '\n**система (фулл)** - показывает данные о системе' \
                '\n**ху | who** - рандомный пользователь + рандомное предложение' \
                '\n**поиск (пидорасов)** -  *поиск пидорасов активирован...*'
-DELAY_TIME = 5
 
 
-async def send_help_message(msg):
-    """Send message with all available commands of bot.
+class HelpMessage(commands.Cog):
+    def __init__(self, client):
+        self.client = client
+        self.delay_time = 5
 
-    Parameters:
-        msg (discord.message.Message): Execute send to channel function
-    """
-    if isinstance(msg.channel, channel.DMChannel):
-        await msg.channel.send(HELP_MESSAGE)
-    else:
-        await msg.author.send(HELP_MESSAGE)
-        warn_msg = await msg.channel.send(f'{msg.author.mention}, проверь личку! '
-                                          'Я отправил тебе помощь по командам',
-                                          delete_after=DELAY_TIME)
-        await sleep(DELAY_TIME)
-        await warn_msg.delete()
+    @commands.Cog.listener()
+    async def on_ready(self):
+        self.client.remove_command('help')
+
+    @commands.command(aliases=['хелп'])
+    async def send_help_message(self, ctx):
+        """Send message with all available commands of bot.
+
+        Parameters:
+            ctx (commands.context.Context): Context object to execute functions
+        """
+        if isinstance(ctx.channel, discord.channel.DMChannel):
+            await ctx.send(HELP_MESSAGE)
+        else:
+            await ctx.author.send(HELP_MESSAGE)
+            await ctx.reply('Хей, проверь личку! '
+                            'Я отправил тебе помощь по командам',
+                            delete_after=self.delay_time)
+            await asyncio.sleep(self.delay_time)
+            await ctx.message.delete()
+
+
+def setup(client):
+    client.add_cog(HelpMessage(client))
